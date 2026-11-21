@@ -35,7 +35,7 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp .env.example .env
-.venv/bin/python -m uvicorn app.main:app --reload --port 8000
+.venv/bin/python -m uvicorn app.main:app --reload --port 8000 --no-access-log
 ```
 
 Check it: <http://localhost:8000/api/health> should show `"ollama": "ok"`.
@@ -50,6 +50,28 @@ npm run dev
 ```
 
 Open <http://localhost:5173>.
+
+## Debug logs
+
+The page calls `/api/...` on the Vite dev server, which forwards it to the
+backend. Both terminals print a short line for every call:
+
+```
+# frontend terminal
+09:41:02 [frontend] → POST /api/chat question: "What is a Python list?"
+09:41:05 [frontend] ← POST /api/chat 200 (3.1s): "A Python list is an ordered, mutable…"
+
+# backend terminal
+09:41:02 [backend] → POST /api/chat
+09:41:02 [backend]    question: 'What is a Python list?'
+09:41:02 [backend]    → Ollama POST /api/chat model=qwen2.5:3b messages=1
+09:41:02 [backend] ← POST /api/chat 200 (4 ms)
+09:41:03 [backend]    ← Ollama first token after 0.6s
+09:41:05 [backend]    reply done: 412 chars in 3.1s: 'A Python list is an ordered, mutable…'
+```
+
+The `← … 200` line comes right away because the reply is streamed; the
+`reply done` line marks the end. Errors (backend or Ollama down) are logged too.
 
 ## Backend API
 
@@ -69,4 +91,4 @@ Open <http://localhost:5173>.
 | `BACKEND_PORT`    | `8000`                   |
 | `FRONTEND_ORIGIN` | `http://localhost:5173`  |
 
-`frontend/.env`: `VITE_BACKEND_URL=http://localhost:8000`
+`frontend/.env`: `BACKEND_URL=http://localhost:8000` (where the Vite dev server forwards `/api`)
