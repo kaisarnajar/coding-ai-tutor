@@ -7,7 +7,8 @@ transport, path `/mcp`) on its own port.
 | Server        | Folder                       | Port | Tools               |
 |---------------|------------------------------|------|---------------------|
 | Bitcoin Price | `mcp_servers/bitcoin_price/` | 8101 | `get_bitcoin_price` |
-| _(next)_      | `mcp_servers/<name>/`        | 8102 |                     |
+| Code Runner   | `mcp_servers/code_runner/`   | 8102 | `run_python`        |
+| _(next)_      | `mcp_servers/<name>/`        | 8103 |                     |
 
 The backend connects to these servers as an MCP client; the frontend never
 talks to them directly.
@@ -16,5 +17,5 @@ talks to them directly.
 
 1. Copy `bitcoin_price/` to a new folder and change the tools and port.
 2. Add its URL to `MCP_SERVERS` in `backend/.env` (comma-separated), e.g.
-   `MCP_SERVERS=http://localhost:8101/mcp,http://localhost:8102/mcp`.
+   `MCP_SERVERS=http://localhost:8101/mcp,http://localhost:8102/mcp,http://localhost:8103/mcp`.
 3. Restart the backend so it reads the new `.env`.

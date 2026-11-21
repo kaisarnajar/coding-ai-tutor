@@ -65,13 +65,19 @@ async def stream_chat(messages: List[Dict[str, Any]]) -> AsyncIterator[str]:
                 content += text
                 yield text
 
-        if not tool_calls:
+        # Done if the model just answered. On the last round tools were not offered,
+        # so any tool request is ignored (otherwise the reply would end with no answer).
+        if not tool_calls or not offer_tools:
             return
 
         messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
         for call in tool_calls:
             name = call["function"]["name"]
-            arguments = call["function"].get("arguments") or {}
+            # Small models often send null for optional arguments; leave those out
+            # so the tool's own defaults apply.
+            arguments = {
+                k: v for k, v in (call["function"].get("arguments") or {}).items() if v is not None
+            }
             result = await mcp_client.call_tool(owners, name, arguments)
             messages.append({"role": "tool", "tool_name": name, "content": result})
 

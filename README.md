@@ -12,6 +12,7 @@ Browser ──► Frontend (:5173) ──► Backend (:8000) ──► Ollama (:
 | MCP server      | Folder                      | Port | Tools               |
 |-----------------|-----------------------------|------|---------------------|
 | Bitcoin Price   | `mcp_servers/bitcoin_price` | 8101 | `get_bitcoin_price` |
+| Code Runner     | `mcp_servers/code_runner`   | 8102 | `run_python`        |
 
 | Folder         | What it is                           | Port  |
 |----------------|--------------------------------------|-------|
@@ -52,8 +53,21 @@ uv pip install --python .venv/bin/python -r requirements.txt
 .venv/bin/python server.py
 ```
 
+```bash
+cd mcp_servers/code_runner
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+.venv/bin/python server.py
+```
+
+The Code Runner runs untrusted code, so it is locked down: a separate process
+in a temporary folder, a 10 s time limit and a 5 s CPU limit, and on macOS a
+`sandbox-exec` sandbox with no network, no access to your home folder, no
+writes outside the temp folder and no starting other programs. Without
+`sandbox-exec` (e.g. on Linux) it refuses to run code.
+
 Check it: <http://localhost:8000/api/health> should show `"ollama": "ok"` and
-`"http://localhost:8101/mcp": "ok (1 tools)"`. MCP servers can be started or
+`"ok (1 tools)"` for each MCP server. MCP servers can be started or
 restarted at any time; the backend reconnects on every question.
 
 **4. Frontend** (in another terminal)
@@ -141,6 +155,6 @@ The `← … 200` line comes right away because the reply is streamed; the
 | `OLLAMA_MODEL`    | `qwen2.5:3b`             |
 | `BACKEND_PORT`    | `8000`                   |
 | `FRONTEND_ORIGIN` | `http://localhost:5173`  |
-| `MCP_SERVERS`     | `http://localhost:8101/mcp` (comma-separated list) |
+| `MCP_SERVERS`     | `http://localhost:8101/mcp,http://localhost:8102/mcp` (comma-separated) |
 
 `frontend/.env`: `BACKEND_URL=http://localhost:8000` (where the Vite dev server forwards `/api`)
