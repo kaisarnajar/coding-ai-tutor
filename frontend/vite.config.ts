@@ -29,7 +29,7 @@ function logApiCalls(): ProxyOptions['configure'] {
         let detail = ''
         try {
           const msgs = JSON.parse(body).messages as { content: string }[]
-          detail = ` question: "${preview(msgs[msgs.length - 1]?.content ?? '')}"`
+          detail = ` messages=${msgs.length} question: "${preview(msgs[msgs.length - 1]?.content ?? '')}"`
         } catch {
           /* not a chat body */
         }

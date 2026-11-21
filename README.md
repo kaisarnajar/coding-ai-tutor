@@ -58,7 +58,7 @@ backend. Both terminals print a short line for every call:
 
 ```
 # frontend terminal
-09:41:02 [frontend] → POST /api/chat question: "What is a Python list?"
+09:41:02 [frontend] → POST /api/chat messages=1 question: "What is a Python list?"
 09:41:05 [frontend] ← POST /api/chat 200 (3.1s): "A Python list is an ordered, mutable…"
 
 # backend terminal

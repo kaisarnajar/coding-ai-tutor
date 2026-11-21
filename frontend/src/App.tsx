@@ -1,35 +1,47 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { streamChat } from './api'
+import type { ChatMessage } from './api'
 import './App.css'
 
 /**
- * Single question → single answer. No conversation history is kept:
- * each question is sent to the model on its own and replaces the previous one.
+ * Chat page. The conversation is kept in browser memory (React state) only:
+ * every question is sent together with all earlier messages so the model has
+ * context. A page refresh clears it.
  */
 function App() {
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
-  const [question, setQuestion] = useState('')
-  const [answer, setAnswer] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
   async function send(e?: FormEvent) {
     e?.preventDefault()
     const text = input.trim()
     if (!text || isStreaming) return
 
-    setQuestion(text)
-    setAnswer('')
+    const history: ChatMessage[] = [...messages, { role: 'user', content: text }]
+    // Show the user's message plus an empty assistant bubble that fills in as the reply streams.
+    setMessages([...history, { role: 'assistant', content: '' }])
     setInput('')
     setIsStreaming(true)
 
-    const appendToAnswer = (chunk: string) => setAnswer((prev) => prev + chunk)
+    const appendToReply = (chunk: string) =>
+      setMessages((prev) => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        next[next.length - 1] = { ...last, content: last.content + chunk }
+        return next
+      })
 
     try {
-      // Only the current question is sent; the model sees no earlier messages.
-      await streamChat([{ role: 'user', content: text }], appendToAnswer)
+      await streamChat(history, appendToReply)
     } catch (err) {
-      appendToAnswer(`\n\n[Could not reach the backend: ${(err as Error).message}]`)
+      appendToReply(`\n\n[Could not reach the backend: ${(err as Error).message}]`)
     } finally {
       setIsStreaming(false)
     }
@@ -50,11 +62,15 @@ function App() {
       </header>
 
       <main className="messages">
-        {!question && <p className="empty">Ask a coding question to get started.</p>}
-        {question && <div className="message user">{question}</div>}
-        {question && (
-          <div className="message assistant">{answer || (isStreaming ? '…' : '')}</div>
+        {messages.length === 0 && (
+          <p className="empty">Ask a coding question to get started.</p>
         )}
+        {messages.map((m, i) => (
+          <div key={i} className={`message ${m.role}`}>
+            {m.content || (isStreaming && i === messages.length - 1 ? '…' : '')}
+          </div>
+        ))}
+        <div ref={bottomRef} />
       </main>
 
       <form className="composer" onSubmit={send}>
