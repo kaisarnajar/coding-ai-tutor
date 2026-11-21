@@ -67,6 +67,15 @@ npm run dev
 
 Open <http://localhost:5173>.
 
+## System prompt
+
+The tutor's instructions live in
+[`backend/app/prompts/system.md`](backend/app/prompts/system.md). The backend
+reads it on every question and sends it to the model as the first (`system`)
+message, so edits take effect on the next question with no restart. The
+frontend never sends or sees it, and any `system` message from the browser is
+dropped. The backend log shows `system prompt: system.md (N chars)` per question.
+
 ## Debug logs
 
 The page calls `/api/...` on the Vite dev server, which forwards it to the

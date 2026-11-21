@@ -1,5 +1,6 @@
 import json
 import time
+from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List
 
 import httpx
@@ -10,6 +11,18 @@ from .log import logger
 
 # How many rounds of tool calls the model may make for one question.
 MAX_TOOL_ROUNDS = 3
+
+# The tutor's instructions. Read on every question, so edits apply without a restart.
+SYSTEM_PROMPT_FILE = Path(__file__).parent / "prompts" / "system.md"
+
+
+def load_system_prompt() -> str:
+    """Return the system prompt text, or "" if the file is missing."""
+    try:
+        return SYSTEM_PROMPT_FILE.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        logger.warning("   system prompt file not found: %s", SYSTEM_PROMPT_FILE)
+        return ""
 
 
 async def is_ollama_up() -> bool:
@@ -30,7 +43,12 @@ async def stream_chat(messages: List[Dict[str, Any]]) -> AsyncIterator[str]:
     for tools instead, they are run on the MCP servers, their results are added to
     the conversation, and Ollama is asked again.
     """
-    messages = list(messages)
+    # The frontend only sends user/assistant messages; the tutor's instructions go first.
+    messages = [m for m in messages if m.get("role") != "system"]
+    system_prompt = load_system_prompt()
+    if system_prompt:
+        messages.insert(0, {"role": "system", "content": system_prompt})
+        logger.info("   system prompt: %s (%d chars)", SYSTEM_PROMPT_FILE.name, len(system_prompt))
     tools, owners = await mcp_client.load_tools()
 
     for round_no in range(MAX_TOOL_ROUNDS + 1):
