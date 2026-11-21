@@ -1,0 +1,13 @@
+# Qdrant vector database for the PDF Q&A MCP server.
+# Start:  docker compose -f vector_db/docker-compose.yml up -d
+# Stop:   docker compose -f vector_db/docker-compose.yml down
+# Data is kept in data/qdrant/ (ignored by git), so it survives restarts.
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.20.2
+    container_name: coding-ai-tutor-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"   # REST API and web dashboard (http://localhost:6333/dashboard)
+    volumes:
+      - ../data/qdrant:/qdrant/storage

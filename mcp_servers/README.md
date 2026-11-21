@@ -8,7 +8,7 @@ transport, path `/mcp`) on its own port.
 |---------------|------------------------------|------|---------------------|
 | Bitcoin Price | `mcp_servers/bitcoin_price/` | 8101 | `get_bitcoin_price` |
 | Code Runner   | `mcp_servers/code_runner/`   | 8102 | `run_python`        |
-| PDF Q&A       | `mcp_servers/pdf_qa/`        | 8103 | `ingest_pdf`, `query_pdf` |
+| PDF Q&A       | `mcp_servers/pdf_qa/`        | 8103 | `ingest_pdf`, `query_pdf` (stores chunks in Qdrant, see `vector_db/`) |
 | _(next)_      | `mcp_servers/<name>/`        | 8104 |                     |
 
 The backend connects to these servers as an MCP client; the frontend never

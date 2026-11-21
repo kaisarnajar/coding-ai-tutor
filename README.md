@@ -7,7 +7,8 @@ a tool it calls one of the MCP servers, each running on its own port.
 
 ```
 Browser ──► Frontend (:5173) ──► Backend (:8000) ──► Ollama (:11434)  or  an OpenAI-compatible API
-                                     └──► MCP servers (:8101, :8102, …)
+                                     └──► MCP servers (:8101, :8102, :8103)
+                                                                 └──► Qdrant vector DB (:6333)
 ```
 
 | MCP server      | Folder                      | Port | Tools               |
@@ -28,6 +29,7 @@ Browser ──► Frontend (:5173) ──► Backend (:8000) ──► Ollama (:
   (for an API model, an API key instead; see [Choosing the model](#choosing-the-model))
 - [uv](https://docs.astral.sh/uv/) and Python 3.12 (`uv python install 3.12`); the MCP SDK needs Python 3.10+
 - Node 18+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) for the Qdrant vector database (used by the PDF Q&A server)
 
 ## Run it
 
@@ -47,7 +49,18 @@ cp .env.example .env
 .venv/bin/python -m uvicorn app.main:app --reload --port 8000 --no-access-log
 ```
 
-**3. MCP servers** (one terminal each; first time: create the venv)
+**3. Vector database** (Qdrant in Docker; Docker Desktop must be running)
+
+```bash
+docker compose -f vector_db/docker-compose.yml up -d
+```
+
+It listens on <http://localhost:6333> (dashboard: <http://localhost:6333/dashboard>)
+and keeps its data in `data/qdrant/`, so saved PDFs survive restarts. The
+container restarts by itself with Docker. Stop it with
+`docker compose -f vector_db/docker-compose.yml down` (the data stays).
+
+**4. MCP servers** (one terminal each; first time: create the venv)
 
 ```bash
 cd mcp_servers/bitcoin_price
@@ -82,7 +95,7 @@ Check it: <http://localhost:8000/api/health> should show `"llm": "Ollama: ok"` a
 `"ok (N tools)"` for each MCP server. MCP servers can be started or
 restarted at any time; the backend reconnects on every question.
 
-**4. Frontend** (in another terminal)
+**5. Frontend** (in another terminal)
 
 ```bash
 cd frontend
@@ -144,14 +157,16 @@ The model then picks the tool from what you ask:
 
 | You say | Tool the model calls |
 |---------|----------------------|
-| Attach a PDF ("Save this PDF", or just send it) | `ingest_pdf(file_id)`: reads the text page by page, splits it into ~1000-character chunks (150 overlap), embeds them with `nomic-embed-text` and keeps them in memory |
+| Attach a PDF ("Save this PDF", or just send it) | `ingest_pdf(file_id)`: reads the text page by page, splits it into ~1000-character chunks (150 overlap), embeds them with `nomic-embed-text` and saves them in Qdrant |
 | "What does my PDF say about loops?" | `query_pdf(question)`: returns the 4 most similar chunks with page numbers; the answer cites them |
 | A general coding question | no PDF tool |
 
-Stage 1 keeps the chunks in the PDF Q&A server's memory, so they are lost when
-that server restarts (attach the PDF again). Only
-[`mcp_servers/pdf_qa/store.py`](mcp_servers/pdf_qa/store.py) needs replacing to
-move to a vector database. Scanned PDFs (images only) have no text and are
+The chunks are stored in the Qdrant collection `pdf_chunks`: one point per
+chunk, with its embedding (768 numbers, cosine distance) and a payload holding
+the PDF name, page number, chunk text and document id. Saved PDFs survive
+restarts of the PDF Q&A server and of Qdrant, and saving the same file again is
+skipped. All database code is in
+[`mcp_servers/pdf_qa/store.py`](mcp_servers/pdf_qa/store.py). Scanned PDFs (images only) have no text and are
 rejected. Small models sometimes skip the tools; a stronger model helps (see
 [Choosing the model](#choosing-the-model)).
 

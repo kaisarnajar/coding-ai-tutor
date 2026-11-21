@@ -1,23 +1,18 @@
-"""In-memory store for PDF chunks and their embeddings.
+"""Vector store for PDF chunks, backed by Qdrant.
 
-Everything lives in this process's memory and is lost when the server stops.
-Moving to a vector database later means replacing only this file: keep the same
-add() / has() / search() / list() methods.
+Each chunk is one Qdrant point: its embedding plus a payload with the document id,
+PDF name, page number, chunk text, and the document's page and chunk counts.
+Qdrant keeps everything on disk (data/qdrant/), so saved PDFs survive restarts.
+
+The rest of the server only uses get() / add() / search() / list() / is_empty(),
+so another vector database could replace this file without other changes.
 """
 
-import math
-from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+import uuid
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
-
-@dataclass
-class StoredChunk:
-    doc_id: str
-    name: str
-    page: int
-    text: str
-    vector: List[float]
-    norm: float
+from qdrant_client import AsyncQdrantClient, models
 
 
 @dataclass
@@ -29,34 +24,99 @@ class Document:
 
 
 @dataclass
-class InMemoryStore:
-    documents: Dict[str, Document] = field(default_factory=dict)
-    chunks: List[StoredChunk] = field(default_factory=list)
+class Passage:
+    doc_id: str
+    name: str
+    page: int
+    text: str
 
-    def has(self, doc_id: str) -> bool:
-        return doc_id in self.documents
 
-    def add(self, doc: Document, items: List[Tuple[int, str, List[float]]]) -> None:
+def _point_id(doc_id: str, index: int) -> str:
+    """Same document + chunk number always gives the same id, so re-saving overwrites."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"pdf_qa/{doc_id}/{index}"))
+
+
+def _doc_filter(doc_id: str) -> models.Filter:
+    return models.Filter(must=[models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id))])
+
+
+def _document(payload: dict) -> Document:
+    return Document(payload["doc_id"], payload["name"], payload["pages"], payload["chunks"])
+
+
+class QdrantStore:
+    def __init__(self, url: str, collection: str) -> None:
+        self.client = AsyncQdrantClient(url=url)
+        self.collection = collection
+
+    async def _ensure_collection(self, vector_size: int) -> None:
+        """Create the collection (cosine distance) the first time it is needed."""
+        if await self.client.collection_exists(self.collection):
+            info = await self.client.get_collection(self.collection)
+            existing = info.config.params.vectors.size
+            if existing != vector_size:
+                raise RuntimeError(
+                    f"Collection {self.collection!r} holds {existing}-dimension vectors, but the "
+                    f"embedding model returns {vector_size}. Use a new QDRANT_COLLECTION name "
+                    "after changing EMBED_MODEL."
+                )
+            return
+        await self.client.create_collection(
+            self.collection,
+            vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
+        )
+        # Indexes make filtering by document and listing documents fast.
+        await self.client.create_payload_index(self.collection, "doc_id", models.PayloadSchemaType.KEYWORD)
+        await self.client.create_payload_index(self.collection, "chunk_index", models.PayloadSchemaType.INTEGER)
+
+    async def get(self, doc_id: str) -> Optional[Document]:
+        """The saved document with this id, or None."""
+        if not await self.client.collection_exists(self.collection):
+            return None
+        points, _ = await self.client.scroll(self.collection, scroll_filter=_doc_filter(doc_id), limit=1)
+        return _document(points[0].payload) if points else None
+
+    async def add(self, doc: Document, items: List[Tuple[int, str, List[float]]]) -> None:
         """Save a document's chunks: (page, text, vector) for each one."""
-        self.documents[doc.doc_id] = doc
-        for page, text, vector in items:
-            self.chunks.append(
-                StoredChunk(doc.doc_id, doc.name, page, text, vector, _norm(vector))
+        await self._ensure_collection(len(items[0][2]))
+        points = [
+            models.PointStruct(
+                id=_point_id(doc.doc_id, index),
+                vector=vector,
+                payload={
+                    "doc_id": doc.doc_id,
+                    "name": doc.name,
+                    "pages": doc.pages,
+                    "chunks": doc.chunks,
+                    "chunk_index": index,
+                    "page": page,
+                    "text": text,
+                },
             )
-
-    def search(self, vector: List[float], top_k: int) -> List[Tuple[float, StoredChunk]]:
-        """The top_k chunks most similar to `vector` (cosine similarity), best first."""
-        query_norm = _norm(vector)
-        scored = [
-            (sum(a * b for a, b in zip(vector, c.vector)) / (query_norm * c.norm or 1.0), c)
-            for c in self.chunks
+            for index, (page, text, vector) in enumerate(items)
         ]
-        scored.sort(key=lambda pair: pair[0], reverse=True)
-        return scored[:top_k]
+        for i in range(0, len(points), 256):  # upload in batches
+            await self.client.upsert(self.collection, points=points[i : i + 256], wait=True)
 
-    def list(self) -> List[Document]:
-        return list(self.documents.values())
+    async def search(self, vector: List[float], top_k: int) -> List[Tuple[float, Passage]]:
+        """The top_k chunks most similar to `vector`, best first."""
+        response = await self.client.query_points(self.collection, query=vector, limit=top_k, with_payload=True)
+        return [
+            (p.score, Passage(p.payload["doc_id"], p.payload["name"], p.payload["page"], p.payload["text"]))
+            for p in response.points
+        ]
 
+    async def list(self) -> List[Document]:
+        """All saved documents (one entry per PDF, from each PDF's first chunk)."""
+        if not await self.client.collection_exists(self.collection):
+            return []
+        first_chunks = models.Filter(
+            must=[models.FieldCondition(key="chunk_index", match=models.MatchValue(value=0))]
+        )
+        points, _ = await self.client.scroll(self.collection, scroll_filter=first_chunks, limit=1000)
+        return [_document(p.payload) for p in points]
 
-def _norm(vector: List[float]) -> float:
-    return math.sqrt(sum(x * x for x in vector))
+    async def is_empty(self) -> bool:
+        if not await self.client.collection_exists(self.collection):
+            return True
+        return (await self.client.count(self.collection, exact=True)).count == 0
