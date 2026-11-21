@@ -14,6 +14,7 @@ Browser ──► Frontend (:5173) ──► Backend (:8000) ──► Ollama (:
 |-----------------|-----------------------------|------|---------------------|
 | Bitcoin Price   | `mcp_servers/bitcoin_price` | 8101 | `get_bitcoin_price` |
 | Code Runner     | `mcp_servers/code_runner`   | 8102 | `run_python`        |
+| PDF Q&A         | `mcp_servers/pdf_qa`        | 8103 | `ingest_pdf`, `query_pdf` |
 
 | Folder         | What it is                           | Port  |
 |----------------|--------------------------------------|-------|
@@ -62,6 +63,15 @@ uv pip install --python .venv/bin/python -r requirements.txt
 .venv/bin/python server.py
 ```
 
+```bash
+cd mcp_servers/pdf_qa
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+.venv/bin/python server.py
+```
+
+The PDF Q&A server needs Ollama's embedding model: `ollama pull nomic-embed-text`.
+
 The Code Runner runs untrusted code, so it is locked down: a separate process
 in a temporary folder, a 10 s time limit and a 5 s CPU limit, and on macOS a
 `sandbox-exec` sandbox with no network, no access to your home folder, no
@@ -69,7 +79,7 @@ writes outside the temp folder and no starting other programs. Without
 `sandbox-exec` (e.g. on Linux) it refuses to run code.
 
 Check it: <http://localhost:8000/api/health> should show `"llm": "Ollama: ok"` and
-`"ok (1 tools)"` for each MCP server. MCP servers can be started or
+`"ok (N tools)"` for each MCP server. MCP servers can be started or
 restarted at any time; the backend reconnects on every question.
 
 **4. Frontend** (in another terminal)
@@ -118,6 +128,32 @@ won't be used.
 The code for each provider is in [`backend/app/llm/`](backend/app/llm/): one
 file per provider, all with the same small interface (`base.py`), so adding
 another kind of provider means adding one file there.
+
+## PDFs
+
+Click 📎 next to the input to attach a PDF (up to 20 MB). It is uploaded to the
+backend right away and saved in `data/uploads/` (ignored by git); the model
+only gets a short `file_id` with your next message:
+
+```
+Save this PDF.
+[Attached PDF: notes.pdf, file_id=3f9a1c2e]
+```
+
+The model then picks the tool from what you ask:
+
+| You say | Tool the model calls |
+|---------|----------------------|
+| Attach a PDF ("Save this PDF", or just send it) | `ingest_pdf(file_id)`: reads the text page by page, splits it into ~1000-character chunks (150 overlap), embeds them with `nomic-embed-text` and keeps them in memory |
+| "What does my PDF say about loops?" | `query_pdf(question)`: returns the 4 most similar chunks with page numbers; the answer cites them |
+| A general coding question | no PDF tool |
+
+Stage 1 keeps the chunks in the PDF Q&A server's memory, so they are lost when
+that server restarts (attach the PDF again). Only
+[`mcp_servers/pdf_qa/store.py`](mcp_servers/pdf_qa/store.py) needs replacing to
+move to a vector database. Scanned PDFs (images only) have no text and are
+rejected. Small models sometimes skip the tools; a stronger model helps (see
+[Choosing the model](#choosing-the-model)).
 
 ## System prompt
 
@@ -183,7 +219,8 @@ With an API model the `Ollama` lines read e.g. `→ API openrouter.ai POST /chat
 | Method | Path          | Body / response |
 |--------|---------------|-----------------|
 | GET    | `/api/health` | `{"backend": "ok", "provider": "ollama", "model": "...", "llm": "Ollama: ok" \| "...: unreachable", "mcp_servers": {...}}` |
-| POST   | `/api/chat`   | Body `{"messages": [{"role": "user", "content": "..."}]}`; streams the reply as plain text |
+| POST   | `/api/chat`   | Body `{"messages": [{"role": "user", "content": "...", "attachments": [{"file_id": "...", "name": "..."}]}]}` (`attachments` optional); streams the reply as plain text |
+| POST   | `/api/uploads` | Multipart form with a `file` (PDF, max 20 MB); returns `{"file_id", "name", "size"}` |
 
 ## Settings
 
@@ -198,6 +235,7 @@ With an API model the `Ollama` lines read e.g. `→ API openrouter.ai POST /chat
 | `API_KEY`         | empty (used with `openai`; secret, never commit it) |
 | `BACKEND_PORT`    | `8000`                   |
 | `FRONTEND_ORIGIN` | `http://localhost:5173`  |
-| `MCP_SERVERS`     | `http://localhost:8101/mcp,http://localhost:8102/mcp` (comma-separated) |
+| `MCP_SERVERS`     | `http://localhost:8101/mcp,http://localhost:8102/mcp,http://localhost:8103/mcp` (comma-separated) |
+| `UPLOAD_DIR`      | `<project>/data/uploads` (shared with the PDF Q&A server) |
 
 `frontend/.env`: `BACKEND_URL=http://localhost:8000` (where the Vite dev server forwards `/api`)

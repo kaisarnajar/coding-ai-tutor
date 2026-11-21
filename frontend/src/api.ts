@@ -1,8 +1,15 @@
 export type Role = 'system' | 'user' | 'assistant'
 
+/** A PDF uploaded to the backend, sent along with a message. */
+export interface Attachment {
+  file_id: string
+  name: string
+}
+
 export interface ChatMessage {
   role: Role
   content: string
+  attachments?: Attachment[]
 }
 
 /**
@@ -33,4 +40,16 @@ export async function streamChat(
     if (done) break
     onChunk(decoder.decode(value, { stream: true }))
   }
+}
+
+/** Upload a PDF to the backend. The model gets its file_id with the next message. */
+export async function uploadPdf(file: File): Promise<Attachment> {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await fetch('/api/uploads', { method: 'POST', body: form })
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}))
+    throw new Error(detail.detail ?? `Upload failed (${response.status})`)
+  }
+  return response.json()
 }

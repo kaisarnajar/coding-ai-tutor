@@ -11,6 +11,8 @@ from .config import get_settings, settings
 from .llm import get_provider
 from .log import block, logger
 from .mcp_client import server_status
+from .uploads import Attachment, with_attachments
+from .uploads import router as uploads_router
 
 app = FastAPI(title="Coding AI Tutor - Backend")
 
@@ -38,9 +40,13 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+app.include_router(uploads_router)
+
+
 class Message(BaseModel):
     role: Literal["system", "user", "assistant"]
     content: str
+    attachments: List[Attachment] = []  # PDFs uploaded with this message
 
 
 class ChatRequest(BaseModel):
@@ -64,7 +70,10 @@ async def health() -> dict:
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest) -> StreamingResponse:
-    messages = [m.model_dump() for m in request.messages]
+    messages = [
+        {"role": m.role, "content": with_attachments(m.content, m.attachments)}
+        for m in request.messages
+    ]
     logger.info("   question:%s", block(messages[-1]["content"]) if messages else "")
 
     async def generate() -> AsyncIterator[str]:

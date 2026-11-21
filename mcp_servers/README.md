@@ -8,7 +8,8 @@ transport, path `/mcp`) on its own port.
 |---------------|------------------------------|------|---------------------|
 | Bitcoin Price | `mcp_servers/bitcoin_price/` | 8101 | `get_bitcoin_price` |
 | Code Runner   | `mcp_servers/code_runner/`   | 8102 | `run_python`        |
-| _(next)_      | `mcp_servers/<name>/`        | 8103 |                     |
+| PDF Q&A       | `mcp_servers/pdf_qa/`        | 8103 | `ingest_pdf`, `query_pdf` |
+| _(next)_      | `mcp_servers/<name>/`        | 8104 |                     |
 
 The backend connects to these servers as an MCP client; the frontend never
 talks to them directly.
@@ -17,5 +18,5 @@ talks to them directly.
 
 1. Copy `bitcoin_price/` to a new folder and change the tools and port.
 2. Add its URL to `MCP_SERVERS` in `backend/.env` (comma-separated), e.g.
-   `MCP_SERVERS=http://localhost:8101/mcp,http://localhost:8102/mcp,http://localhost:8103/mcp`.
-3. Restart the backend so it reads the new `.env`.
+   `MCP_SERVERS=http://localhost:8101/mcp,http://localhost:8102/mcp,http://localhost:8103/mcp,http://localhost:8104/mcp`.
+3. The backend re-reads `.env` on every question, so no restart is needed.

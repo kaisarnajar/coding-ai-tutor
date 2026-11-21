@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import List, Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,6 +24,8 @@ class Settings(BaseSettings):
 
     backend_port: int = 8000
     frontend_origin: str = "http://localhost:5173"
+    # Where uploaded PDFs are saved; the PDF Q&A MCP server reads them from here.
+    upload_dir: str = str(Path(__file__).resolve().parents[2] / "data" / "uploads")
     # Comma-separated MCP server URLs, e.g. "http://localhost:8101/mcp,http://localhost:8102/mcp"
     mcp_servers: str = ""
 

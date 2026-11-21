@@ -83,3 +83,53 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.composer button.attach {
+  padding: 0 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  font-size: 18px;
+}
+
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px 0;
+  border-top: 1px solid var(--border);
+}
+
+.attachments + .composer {
+  border-top: none;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.message .file-chip {
+  margin-bottom: 6px;
+}
+
+.file-chip button {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.upload-error {
+  color: #d33;
+  font-size: 13px;
+  align-self: center;
+}
