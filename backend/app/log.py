@@ -13,7 +13,6 @@ if not logger.handlers:
     logger.propagate = False
 
 
-def preview(text: str, limit: int = 80) -> str:
-    """Shorten text to one line for log output."""
-    flat = " ".join(text.split())
-    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+def block(text: str) -> str:
+    """Return the full text on its own lines, indented under the log line."""
+    return "".join(f"\n      {line}" for line in text.splitlines() or [""])

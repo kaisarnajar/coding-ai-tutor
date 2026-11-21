@@ -58,17 +58,25 @@ backend. Both terminals print a short line for every call:
 
 ```
 # frontend terminal
-09:41:02 [frontend] → POST /api/chat messages=1 question: "What is a Python list?"
-09:41:05 [frontend] ← POST /api/chat 200 (3.1s): "A Python list is an ordered, mutable…"
+09:41:02 [frontend] → POST /api/chat messages=1 question:
+      What is a Python list?
+09:41:05 [frontend] ← POST /api/chat 200 (3.1s):
+      A Python list is an ordered, mutable collection of items.
+      Example: nums = [1, 2, 3]
 
 # backend terminal
 09:41:02 [backend] → POST /api/chat
-09:41:02 [backend]    question: 'What is a Python list?'
+09:41:02 [backend]    question:
+      What is a Python list?
 09:41:02 [backend]    → Ollama POST /api/chat model=qwen2.5:3b messages=1
 09:41:02 [backend] ← POST /api/chat 200 (4 ms)
 09:41:03 [backend]    ← Ollama first token after 0.6s
-09:41:05 [backend]    reply done: 412 chars in 3.1s: 'A Python list is an ordered, mutable…'
+09:41:05 [backend]    reply done: 84 chars in 3.1s:
+      A Python list is an ordered, mutable collection of items.
+      Example: nums = [1, 2, 3]
 ```
+
+The full question and reply are printed, with their line breaks kept.
 
 The `← … 200` line comes right away because the reply is streamed; the
 `reply done` line marks the end. Errors (backend or Ollama down) are logged too.

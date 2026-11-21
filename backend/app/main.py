@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from .config import settings
-from .log import logger, preview
+from .log import block, logger
 from .ollama_client import is_ollama_up, stream_chat
 
 app = FastAPI(title="Coding AI Tutor - Backend")
@@ -59,7 +59,7 @@ async def health() -> dict:
 @app.post("/api/chat")
 async def chat(request: ChatRequest) -> StreamingResponse:
     messages = [m.model_dump() for m in request.messages]
-    logger.info("   question: %r", preview(messages[-1]["content"]) if messages else "")
+    logger.info("   question:%s", block(messages[-1]["content"]) if messages else "")
 
     async def generate() -> AsyncIterator[str]:
         started = time.perf_counter()
@@ -69,10 +69,10 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                 reply += text
                 yield text
             logger.info(
-                "   reply done: %d chars in %.1fs: %r",
+                "   reply done: %d chars in %.1fs:%s",
                 len(reply),
                 time.perf_counter() - started,
-                preview(reply),
+                block(reply),
             )
         except Exception as exc:  # surface the problem in the chat instead of a silent cut-off
             logger.error("   chat failed after %.1fs: %s", time.perf_counter() - started, exc)

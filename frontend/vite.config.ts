@@ -6,10 +6,9 @@ import type { ProxyOptions } from 'vite'
 const time = () => new Date().toTimeString().slice(0, 8)
 const log = (msg: string) => console.log(`${time()} [frontend] ${msg}`)
 
-/** Shorten text to one line for log output. */
-function preview(text: string, limit = 80): string {
-  const flat = text.replace(/\s+/g, ' ').trim()
-  return flat.length <= limit ? flat : `${flat.slice(0, limit - 1)}…`
+/** Return the full text on its own lines, indented under the log line. */
+function block(text: string): string {
+  return text.split(/\r?\n/).map((line) => `\n      ${line}`).join('')
 }
 
 /** Collect a stream's text without consuming it (the proxy still pipes it on). */
@@ -19,7 +18,7 @@ function tap(stream: IncomingMessage, onEnd: (text: string) => void) {
   stream.on('end', () => onEnd(Buffer.concat(chunks).toString('utf8')))
 }
 
-/** Log every /api call that the page makes, with a short preview of request and reply. */
+/** Log every /api call that the page makes, with the full question and reply. */
 function logApiCalls(): ProxyOptions['configure'] {
   return (proxy) => {
     proxy.on('proxyReq', (_proxyReq, req) => {
@@ -29,7 +28,7 @@ function logApiCalls(): ProxyOptions['configure'] {
         let detail = ''
         try {
           const msgs = JSON.parse(body).messages as { content: string }[]
-          detail = ` messages=${msgs.length} question: "${preview(msgs[msgs.length - 1]?.content ?? '')}"`
+          detail = ` messages=${msgs.length} question:${block(msgs[msgs.length - 1]?.content ?? '')}`
         } catch {
           /* not a chat body */
         }
@@ -41,7 +40,7 @@ function logApiCalls(): ProxyOptions['configure'] {
       const started = (req as IncomingMessage & { started?: number }).started ?? Date.now()
       tap(proxyRes, (body) => {
         const secs = ((Date.now() - started) / 1000).toFixed(1)
-        log(`← ${req.method} ${req.url} ${proxyRes.statusCode} (${secs}s): "${preview(body)}"`)
+        log(`← ${req.method} ${req.url} ${proxyRes.statusCode} (${secs}s):${block(body)}`)
       })
     })
 
