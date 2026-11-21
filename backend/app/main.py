@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from .config import settings
 from .log import block, logger
+from .mcp_client import server_status
 from .ollama_client import is_ollama_up, stream_chat
 
 app = FastAPI(title="Coding AI Tutor - Backend")
@@ -51,6 +52,7 @@ async def health() -> dict:
         "backend": "ok",
         "ollama": "ok" if await is_ollama_up() else "unreachable",
         "model": settings.ollama_model,
+        "mcp_servers": await server_status(),
     }
     logger.info("   health: %s", result)
     return result

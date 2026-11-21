@@ -1,23 +1,28 @@
 # Coding AI Tutor
 
 A local coding tutor: a React frontend talks to a FastAPI backend, which talks
-to a local Ollama model (and, in later steps, to MCP servers).
+to a local Ollama model. When the model needs live data it calls tools on MCP
+servers, each running on its own port.
 
 ```
 Browser ──► Frontend (:5173) ──► Backend (:8000) ──► Ollama (:11434)
-                                     └──► MCP servers (:8101, :8102, …)  [later]
+                                     └──► MCP servers (:8101, :8102, …)
 ```
+
+| MCP server      | Folder                      | Port | Tools               |
+|-----------------|-----------------------------|------|---------------------|
+| Bitcoin Price   | `mcp_servers/bitcoin_price` | 8101 | `get_bitcoin_price` |
 
 | Folder         | What it is                           | Port  |
 |----------------|--------------------------------------|-------|
 | `frontend/`    | Vite + React + TypeScript chat UI    | 5173  |
 | `backend/`     | FastAPI; the only part that calls Ollama / MCP | 8000  |
-| `mcp_servers/` | One folder per MCP server (step 2+)  | 8101+ |
+| `mcp_servers/` | One folder per MCP server            | 8101+ |
 
 ## Prerequisites
 
 - [Ollama](https://ollama.com) running, with the model pulled: `ollama pull qwen2.5:3b`
-- Python 3.9+
+- [uv](https://docs.astral.sh/uv/) and Python 3.12 (`uv python install 3.12`); the MCP SDK needs Python 3.10+
 - Node 18+
 
 ## Run it
@@ -32,15 +37,26 @@ ollama serve
 
 ```bash
 cd backend
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
 cp .env.example .env
 .venv/bin/python -m uvicorn app.main:app --reload --port 8000 --no-access-log
 ```
 
-Check it: <http://localhost:8000/api/health> should show `"ollama": "ok"`.
+**3. MCP servers** (one terminal each; first time: create the venv)
 
-**3. Frontend** (in a second terminal)
+```bash
+cd mcp_servers/bitcoin_price
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+.venv/bin/python server.py
+```
+
+Check it: <http://localhost:8000/api/health> should show `"ollama": "ok"` and
+`"http://localhost:8101/mcp": "ok (1 tools)"`. MCP servers can be started or
+restarted at any time; the backend reconnects on every question.
+
+**4. Frontend** (in another terminal)
 
 ```bash
 cd frontend
@@ -78,6 +94,24 @@ backend. Both terminals print a short line for every call:
 
 The full question and reply are printed, with their line breaks kept.
 
+When the model uses a tool, the backend terminal also shows the tool call and
+its full result, and the MCP server's terminal logs the call too:
+
+```
+# backend terminal
+10:20:01 [backend]    MCP tools available: get_bitcoin_price
+10:20:01 [backend]    → Ollama POST /api/chat model=qwen2.5:3b messages=1 tools=1
+10:20:02 [backend]    ← Ollama wants tool get_bitcoin_price({"currency": "usd"})
+10:20:02 [backend]    → MCP tool get_bitcoin_price({"currency": "usd"}) on http://localhost:8101/mcp
+10:20:02 [backend]    ← MCP tool get_bitcoin_price result:
+      {"coin": "bitcoin", "currency": "USD", "price": 56284, ...}
+10:20:02 [backend]    → Ollama POST /api/chat model=qwen2.5:3b messages=3 tools=1
+
+# bitcoin_price terminal
+10:20:02 [bitcoin_price] → get_bitcoin_price(currency='usd')
+10:20:02 [bitcoin_price] ← {'coin': 'bitcoin', 'currency': 'USD', 'price': 56284, ...}
+```
+
 The `← … 200` line comes right away because the reply is streamed; the
 `reply done` line marks the end. Errors (backend or Ollama down) are logged too.
 
@@ -98,5 +132,6 @@ The `← … 200` line comes right away because the reply is streamed; the
 | `OLLAMA_MODEL`    | `qwen2.5:3b`             |
 | `BACKEND_PORT`    | `8000`                   |
 | `FRONTEND_ORIGIN` | `http://localhost:5173`  |
+| `MCP_SERVERS`     | `http://localhost:8101/mcp` (comma-separated list) |
 
 `frontend/.env`: `BACKEND_URL=http://localhost:8000` (where the Vite dev server forwards `/api`)
