@@ -9,11 +9,12 @@ from typing import Any, Dict, List, Tuple
 
 from mcp import Client
 
-from .config import settings
+from .config import Settings, get_settings
 from .log import block, logger
 
-# Ollama tool definitions, and which server URL owns each tool name.
-OllamaTools = List[Dict[str, Any]]
+# Tool definitions (OpenAI-style, which Ollama also accepts), and which server URL owns
+# each tool name.
+ToolList = List[Dict[str, Any]]
 ToolOwners = Dict[str, str]
 
 
@@ -24,9 +25,9 @@ def _reason(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-async def load_tools() -> Tuple[OllamaTools, ToolOwners]:
-    """Collect the tools from every MCP server, in the format Ollama expects."""
-    tools: OllamaTools = []
+async def load_tools(settings: Settings) -> Tuple[ToolList, ToolOwners]:
+    """Collect the tools from every MCP server, in the format the models expect."""
+    tools: ToolList = []
     owners: ToolOwners = {}
     for url in settings.mcp_server_urls:
         try:
@@ -81,7 +82,7 @@ async def call_tool(owners: ToolOwners, name: str, arguments: Dict[str, Any]) ->
 async def server_status() -> Dict[str, str]:
     """Return 'ok (N tools)' or 'unreachable' for each MCP server."""
     status: Dict[str, str] = {}
-    for url in settings.mcp_server_urls:
+    for url in get_settings().mcp_server_urls:
         try:
             async with Client(url) as client:
                 count = len((await client.list_tools()).tools)

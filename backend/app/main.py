@@ -6,10 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .config import settings
+from .chat import stream_chat
+from .config import get_settings, settings
+from .llm import get_provider
 from .log import block, logger
 from .mcp_client import server_status
-from .ollama_client import is_ollama_up, stream_chat
 
 app = FastAPI(title="Coding AI Tutor - Backend")
 
@@ -48,10 +49,13 @@ class ChatRequest(BaseModel):
 
 @app.get("/api/health")
 async def health() -> dict:
+    current = get_settings()
+    provider = get_provider(current)
     result = {
         "backend": "ok",
-        "ollama": "ok" if await is_ollama_up() else "unreachable",
-        "model": settings.ollama_model,
+        "provider": current.llm_provider,
+        "model": provider.model,
+        "llm": f"{provider.label}: " + ("ok" if await provider.is_up() else "unreachable"),
         "mcp_servers": await server_status(),
     }
     logger.info("   health: %s", result)
@@ -78,7 +82,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
             )
         except Exception as exc:  # surface the problem in the chat instead of a silent cut-off
             logger.error("   chat failed after %.1fs: %s", time.perf_counter() - started, exc)
-            yield f"\n\n[Error talking to Ollama: {exc}]"
+            yield f"\n\n[Error talking to the model: {exc}]"
 
     return StreamingResponse(generate(), media_type="text/plain; charset=utf-8")
 

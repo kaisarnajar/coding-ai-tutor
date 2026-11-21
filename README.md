@@ -1,11 +1,12 @@
 # Coding AI Tutor
 
-A local coding tutor: a React frontend talks to a FastAPI backend, which talks
-to a local Ollama model. When the model needs live data it calls tools on MCP
-servers, each running on its own port.
+A coding tutor: a React frontend talks to a FastAPI backend, which talks to a
+chat model, either a local Ollama model or a model behind an API such as
+OpenRouter (see [Choosing the model](#choosing-the-model)). When the model needs
+a tool it calls one of the MCP servers, each running on its own port.
 
 ```
-Browser ──► Frontend (:5173) ──► Backend (:8000) ──► Ollama (:11434)
+Browser ──► Frontend (:5173) ──► Backend (:8000) ──► Ollama (:11434)  or  an OpenAI-compatible API
                                      └──► MCP servers (:8101, :8102, …)
 ```
 
@@ -17,18 +18,19 @@ Browser ──► Frontend (:5173) ──► Backend (:8000) ──► Ollama (:
 | Folder         | What it is                           | Port  |
 |----------------|--------------------------------------|-------|
 | `frontend/`    | Vite + React + TypeScript chat UI    | 5173  |
-| `backend/`     | FastAPI; the only part that calls Ollama / MCP | 8000  |
+| `backend/`     | FastAPI; the only part that calls the model / MCP | 8000  |
 | `mcp_servers/` | One folder per MCP server            | 8101+ |
 
 ## Prerequisites
 
-- [Ollama](https://ollama.com) running, with the model pulled: `ollama pull qwen2.5:3b`
+- For a local model: [Ollama](https://ollama.com) running, with the model pulled: `ollama pull qwen2.5:3b`
+  (for an API model, an API key instead; see [Choosing the model](#choosing-the-model))
 - [uv](https://docs.astral.sh/uv/) and Python 3.12 (`uv python install 3.12`); the MCP SDK needs Python 3.10+
 - Node 18+
 
 ## Run it
 
-**1. Ollama** (skip if the Ollama app is already running)
+**1. Ollama** (skip if the Ollama app is already running, or if you use an API model)
 
 ```bash
 ollama serve
@@ -66,7 +68,7 @@ in a temporary folder, a 10 s time limit and a 5 s CPU limit, and on macOS a
 writes outside the temp folder and no starting other programs. Without
 `sandbox-exec` (e.g. on Linux) it refuses to run code.
 
-Check it: <http://localhost:8000/api/health> should show `"ollama": "ok"` and
+Check it: <http://localhost:8000/api/health> should show `"llm": "Ollama: ok"` and
 `"ok (1 tools)"` for each MCP server. MCP servers can be started or
 restarted at any time; the backend reconnects on every question.
 
@@ -80,6 +82,42 @@ npm run dev
 ```
 
 Open <http://localhost:5173>.
+
+## Choosing the model
+
+Two settings in `backend/.env` pick the model. They are read again on every
+question, so a change applies to the next question with no restart.
+
+**Local model with Ollama** (default)
+
+```
+LLM_PROVIDER=ollama
+LLM_MODEL=qwen2.5:3b
+```
+
+Any model from `ollama list` works, including Ollama cloud models such as
+`glm-5.3:cloud`. Pull it first, e.g. `ollama pull mimo-v2.6`.
+
+**Model through an API**
+
+`LLM_PROVIDER=openai` works with any OpenAI-compatible API. For OpenRouter:
+
+```
+LLM_PROVIDER=openai
+LLM_MODEL=anthropic/claude-sonnet-5.5
+API_BASE_URL=https://openrouter.ai/api/v1
+API_KEY=<your OpenRouter key>
+```
+
+Other services only need a different `API_BASE_URL`, `LLM_MODEL` and key,
+e.g. OpenAI (`https://api.openai.com/v1`), or LM Studio on your own machine
+(`http://localhost:1234/v1`, no key). Keep `API_KEY` only in `backend/.env`,
+which git ignores. Pick a model that supports tool calling, or the MCP tools
+won't be used.
+
+The code for each provider is in [`backend/app/llm/`](backend/app/llm/): one
+file per provider, all with the same small interface (`base.py`), so adding
+another kind of provider means adding one file there.
 
 ## System prompt
 
@@ -107,9 +145,10 @@ backend. Both terminals print a short line for every call:
 09:41:02 [backend] → POST /api/chat
 09:41:02 [backend]    question:
       What is a Python list?
+09:41:02 [backend]    model: qwen2.5:3b via Ollama
 09:41:02 [backend]    → Ollama POST /api/chat model=qwen2.5:3b messages=1
 09:41:02 [backend] ← POST /api/chat 200 (4 ms)
-09:41:03 [backend]    ← Ollama first token after 0.6s
+09:41:03 [backend]    ← Ollama first output after 0.6s
 09:41:05 [backend]    reply done: 84 chars in 3.1s:
       A Python list is an ordered, mutable collection of items.
       Example: nums = [1, 2, 3]
@@ -136,13 +175,14 @@ its full result, and the MCP server's terminal logs the call too:
 ```
 
 The `← … 200` line comes right away because the reply is streamed; the
-`reply done` line marks the end. Errors (backend or Ollama down) are logged too.
+`reply done` line marks the end. Errors (backend or model down) are logged too.
+With an API model the `Ollama` lines read e.g. `→ API openrouter.ai POST /chat/completions ...`.
 
 ## Backend API
 
 | Method | Path          | Body / response |
 |--------|---------------|-----------------|
-| GET    | `/api/health` | `{"backend": "ok", "ollama": "ok" \| "unreachable", "model": "..."}` |
+| GET    | `/api/health` | `{"backend": "ok", "provider": "ollama", "model": "...", "llm": "Ollama: ok" \| "...: unreachable", "mcp_servers": {...}}` |
 | POST   | `/api/chat`   | Body `{"messages": [{"role": "user", "content": "..."}]}`; streams the reply as plain text |
 
 ## Settings
@@ -151,8 +191,11 @@ The `← … 200` line comes right away because the reply is streamed; the
 
 | Variable          | Default                  |
 |-------------------|--------------------------|
-| `OLLAMA_URL`      | `http://localhost:11434` |
-| `OLLAMA_MODEL`    | `qwen2.5:3b`             |
+| `LLM_PROVIDER`    | `ollama` (or `openai` for any OpenAI-compatible API) |
+| `LLM_MODEL`       | `qwen2.5:3b`             |
+| `OLLAMA_URL`      | `http://localhost:11434` (used with `ollama`) |
+| `API_BASE_URL`    | `https://openrouter.ai/api/v1` (used with `openai`) |
+| `API_KEY`         | empty (used with `openai`; secret, never commit it) |
 | `BACKEND_PORT`    | `8000`                   |
 | `FRONTEND_ORIGIN` | `http://localhost:5173`  |
 | `MCP_SERVERS`     | `http://localhost:8101/mcp,http://localhost:8102/mcp` (comma-separated) |
