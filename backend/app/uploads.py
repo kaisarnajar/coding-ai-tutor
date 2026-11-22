@@ -1,12 +1,14 @@
 """PDF uploads.
 
 The frontend uploads a PDF here. It is saved as <UPLOAD_DIR>/<file_id>.pdf, with
-<file_id>.json holding its original name. The PDF Q&A MCP server reads it from the
+<file_id>.json holding its original name. The file_id comes from the file's content
+(SHA-256), so uploading the same PDF again gives the same file_id and is never
+stored twice. The PDF Q&A MCP server reads it from the
 same folder when the model calls ingest_pdf(file_id).
 """
 
+import hashlib
 import json
-import uuid
 from pathlib import Path
 from typing import List
 
@@ -41,12 +43,18 @@ async def upload_pdf(file: UploadFile) -> dict:
     if not data.startswith(b"%PDF-"):
         raise HTTPException(415, "Only PDF files can be uploaded")
 
-    file_id = uuid.uuid4().hex[:8]
+    # Same content -> same id, so a re-upload overwrites itself instead of making a copy.
+    file_id = hashlib.sha256(data).hexdigest()[:8]
     folder = upload_dir()
-    (folder / f"{file_id}.pdf").write_bytes(data)
+    pdf = folder / f"{file_id}.pdf"
+    already = pdf.exists()
+    pdf.write_bytes(data)
     (folder / f"{file_id}.json").write_text(json.dumps({"name": name, "size": len(data)}), encoding="utf-8")
 
-    logger.info("   saved upload %s as %s.pdf (%.1f KB)", name, file_id, len(data) / 1024)
+    logger.info(
+        "   %s upload %s as %s.pdf (%.1f KB)",
+        "same file again:" if already else "saved", name, file_id, len(data) / 1024,
+    )
     return {"file_id": file_id, "name": name, "size": len(data)}
 
 

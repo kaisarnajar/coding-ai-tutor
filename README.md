@@ -15,7 +15,7 @@ Browser ──► Frontend (:5173) ──► Backend (:8000) ──► Ollama (:
 |-----------------|-----------------------------|------|---------------------|
 | Bitcoin Price   | `mcp_servers/bitcoin_price` | 8101 | `get_bitcoin_price` |
 | Code Runner     | `mcp_servers/code_runner`   | 8102 | `run_python`        |
-| PDF Q&A         | `mcp_servers/pdf_qa`        | 8103 | `ingest_pdf`, `query_pdf` |
+| PDF Q&A         | `mcp_servers/pdf_qa`        | 8103 | `ingest_pdf`, `query_pdf`, `read_pdf_pages` |
 
 | Folder         | What it is                           | Port  |
 |----------------|--------------------------------------|-------|
@@ -159,13 +159,16 @@ The model then picks the tool from what you ask:
 |---------|----------------------|
 | Attach a PDF ("Save this PDF", or just send it) | `ingest_pdf(file_id)`: reads the text page by page, splits it into ~1000-character chunks (150 overlap), embeds them with `nomic-embed-text` and saves them in Qdrant |
 | "What does my PDF say about loops?" | `query_pdf(question)`: returns the 4 most similar chunks with page numbers; the answer cites them |
+| "List all the chapters", "What is on page 5?" | `read_pdf_pages(pages)`: returns whole pages, rebuilt from their chunks (max 5 per call); `pages="contents"` finds the table of contents |
 | A general coding question | no PDF tool |
 
 The chunks are stored in the Qdrant collection `pdf_chunks`: one point per
 chunk, with its embedding (768 numbers, cosine distance) and a payload holding
 the PDF name, page number, chunk text and document id. Saved PDFs survive
-restarts of the PDF Q&A server and of Qdrant, and saving the same file again is
-skipped. All database code is in
+restarts of the PDF Q&A server and of Qdrant. A PDF's `file_id` is the first 8
+characters of the SHA-256 hash of its content, so uploading the same file again
+gives the same id and it is never stored twice; `query_pdf` also skips repeated
+passages. All database code is in
 [`mcp_servers/pdf_qa/store.py`](mcp_servers/pdf_qa/store.py). Scanned PDFs (images only) have no text and are
 rejected. Small models sometimes skip the tools; a stronger model helps (see
 [Choosing the model](#choosing-the-model)).

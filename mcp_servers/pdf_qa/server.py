@@ -2,10 +2,14 @@
 
 Runs on its own port (default 8103) using MCP's Streamable HTTP transport at /mcp.
 
-Two tools:
+Three tools:
 - ingest_pdf: read a PDF the learner uploaded, split it into chunks, embed them and
   save them in the Qdrant vector database.
-- query_pdf: find the chunks most relevant to a question.
+- query_pdf: find the chunks most relevant to a question (search by topic).
+- read_pdf_pages: return the full text of given pages (read a known place, e.g. the
+  table of contents), for questions that similarity search cannot answer.
+
+A PDF's id is a hash of its content, so the same file is only ever stored once.
 
 How a PDF gets here: the frontend uploads it to the backend, which saves it as
 <UPLOAD_DIR>/<file_id>.pdf (plus <file_id>.json with its original name) and tells
@@ -18,6 +22,7 @@ model is served by an API. Chunks and their embeddings are stored in Qdrant
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -45,6 +50,7 @@ CHUNK_SIZE = 1000  # characters per chunk
 CHUNK_OVERLAP = 150  # characters shared by neighbouring chunks
 EMBED_BATCH = 32  # chunks embedded per Ollama request
 MAX_TOP_K = 8
+MAX_PAGES_PER_READ = 5  # so one call cannot flood the model with a whole book
 
 logger = logging.getLogger("pdf_qa")
 _handler = logging.StreamHandler(sys.stdout)
@@ -90,6 +96,58 @@ def _find_upload(file_id: str) -> Optional[Tuple[str, Path, str]]:
     return None
 
 
+def _content_id(path: Path) -> str:
+    """Same bytes -> same id. Matches the file_id the backend gives new uploads."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:8]
+
+
+def _parse_pages(pages: str) -> List[int]:
+    """'2' -> [2], '10-12' -> [10, 11, 12], '3, 5' -> [3, 5]."""
+    numbers: List[int] = []
+    for part in str(pages).replace(" ", "").split(","):
+        if not part:
+            continue
+        if "-" in part:
+            start, end = (int(x) for x in part.split("-", 1))
+            numbers.extend(range(start, end + 1))
+        else:
+            numbers.append(int(part))
+    return sorted(set(numbers))
+
+
+CONTENTS_WORDS = {"contents", "content", "toc", "table of contents", "index", "chapters"}
+
+
+async def _contents_pages(doc: Document) -> List[int]:
+    """Find the table of contents among the first 10 pages.
+
+    A page counts if it says "contents" or lists several chapters/sections. If none
+    is found, pages 1-3 are returned.
+    """
+    first = list(range(1, min(doc.pages, 10) + 1))
+    rows = await store.get_pages(doc.doc_id, first)
+    found = []
+    for n in first:
+        text = _join_chunks([t for page, _, t in rows if page == n])
+        entries = len(re.findall(r"(?im)^\s*(chapter|section|part|unit|lesson)?\s*\d+[.:)]?\s+\S", text))
+        if "contents" in text.lower() or entries >= 8:
+            found.append(n)
+    return found[:MAX_PAGES_PER_READ] or first[:3]
+
+
+def _join_chunks(texts: List[str]) -> str:
+    """Join neighbouring chunks of one page, dropping the text they share (the overlap)."""
+    joined = ""
+    for text in texts:
+        overlap = 0
+        for size in range(min(len(joined), len(text), CHUNK_OVERLAP + 50), 19, -1):  # 20+ chars, so a chance match is not taken for the overlap
+            if joined.endswith(text[:size]):
+                overlap = size
+                break
+        joined += text[overlap:] if overlap else (("\n" if joined else "") + text)
+    return joined
+
+
 async def _embed(texts: List[str]) -> List[List[float]]:
     """Embed texts with Ollama, a batch at a time."""
     vectors: List[List[float]] = []
@@ -122,7 +180,8 @@ async def ingest_pdf(file_id: str) -> dict:
         result = {"error": f"No uploaded PDF with file_id {file_id!r}. Ask the learner to attach it again."}
         logger.info("← %s", result)
         return result
-    doc_id, path, name = found
+    _, path, name = found
+    doc_id = _content_id(path)
 
     try:
         doc = await store.get(doc_id)
@@ -169,9 +228,11 @@ async def ingest_pdf(file_id: str) -> dict:
 async def query_pdf(question: str, top_k: int = 4) -> dict:
     """Find the passages in the saved PDFs that answer a question.
 
-    Searches all saved PDFs at once; no file_id is needed. Call this when the learner asks about the content of a PDF they saved
-    ("what does the PDF say about...", "summarise chapter 2", ...). Answer only from
-    the returned passages and cite their page numbers.
+    Searches all saved PDFs at once; no file_id is needed. Call this when the learner
+    asks what a saved PDF says about a topic ("what does the PDF say about...",
+    "explain decorators from my notes"). Answer only from the returned passages and
+    cite their page numbers. Not for listing chapters or reading a given page: use
+    read_pdf_pages for those.
 
     Args:
         question: The learner's question, or the topic to look up.
@@ -191,9 +252,17 @@ async def query_pdf(question: str, top_k: int = 4) -> dict:
         return result
 
     [vector] = await _embed([f"search_query: {question}"])
-    hits = await store.search(vector, top_k)
+    # Ask for extra results and skip repeated text, so duplicates never crowd out
+    # other passages.
+    hits, seen = [], set()
+    for score, c in await store.search(vector, top_k * 3):
+        if c.text not in seen:
+            seen.add(c.text)
+            hits.append((score, c))
+        if len(hits) == top_k:
+            break
     result = {
-        "saved_pdfs": [d.name for d in await store.list()],
+        "saved_pdfs": sorted({d.name for d in await store.list()}),
         "passages": [
             {"pdf": c.name, "page": c.page, "score": round(score, 3), "text": c.text}
             for score, c in hits
@@ -202,6 +271,79 @@ async def query_pdf(question: str, top_k: int = 4) -> dict:
     for score, c in hits:
         logger.info("   %.3f  %s p.%d:%s", score, c.name, c.page, _block(c.text))
     logger.info("← %d passages", len(hits))
+    return result
+
+
+@mcp.tool()
+async def read_pdf_pages(pages: str, pdf: str = "") -> dict:
+    """Read the full text of specific pages of a saved PDF.
+
+    Use this instead of query_pdf when the learner asks about a place in the PDF
+    rather than a topic:
+    - "list all the chapters", "what topics does it cover", "what is the first
+      chapter": pass pages="contents" to get the table of contents.
+    - "what is on page 5", "summarise pages 10-12": pass those page numbers.
+    At most 5 pages per call.
+
+    Args:
+        pages: "contents" for the table of contents, or page numbers such as "2", "10-12" or "3, 5".
+        pdf: The PDF's name, e.g. "notes.pdf". Can be left empty when only one PDF is saved.
+    """
+    logger.info("→ read_pdf_pages(pages=%r, pdf=%r)", pages, pdf)
+    try:
+        documents = await store.list()
+    except Exception as exc:
+        result = {"error": f"The vector database is not reachable ({type(exc).__name__}). Is Qdrant running?"}
+        logger.info("← %s", result)
+        return result
+    if not documents:
+        result = {"error": "No PDFs have been saved yet. Ask the learner to attach a PDF with the 📎 button."}
+        logger.info("← %s", result)
+        return result
+
+    wanted = pdf.strip().lower()
+    matches = [d for d in documents if wanted and (d.name.lower() == wanted or d.doc_id == wanted)]
+    if not matches and len(documents) == 1:
+        matches = documents
+    if not matches:
+        result = {"error": f"Say which PDF to read. Saved PDFs: {', '.join(d.name for d in documents)}"}
+        logger.info("← %s", result)
+        return result
+    doc = matches[0]
+
+    try:
+        if str(pages).strip().lower() in CONTENTS_WORDS:
+            numbers = await _contents_pages(doc)
+        else:
+            numbers = _parse_pages(pages)
+    except ValueError:
+        result = {"error": f"Could not understand pages {pages!r}. Use e.g. \"2\", \"10-12\" or \"3, 5\"."}
+        logger.info("← %s", result)
+        return result
+    numbers = [n for n in numbers if 1 <= n <= doc.pages]
+    if not numbers:
+        result = {"error": f"{doc.name} has pages 1 to {doc.pages}."}
+        logger.info("← %s", result)
+        return result
+    note = None
+    if len(numbers) > MAX_PAGES_PER_READ:
+        note = f"Only the first {MAX_PAGES_PER_READ} pages were returned; ask again for the rest."
+        numbers = numbers[:MAX_PAGES_PER_READ]
+
+    rows = await store.get_pages(doc.doc_id, numbers)
+    result = {
+        "pdf": doc.name,
+        "total_pages": doc.pages,
+        "pages": [
+            {"page": n, "text": _join_chunks([text for page, _, text in rows if page == n])}
+            for n in numbers
+        ],
+    }
+    if note:
+        result["note"] = note
+    for page in result["pages"]:
+        logger.info("   %s p.%d (%d chars)", doc.name, page["page"], len(page["text"]))
+    logger.info("← %d pages", len(result["pages"]))
     return result
 
 

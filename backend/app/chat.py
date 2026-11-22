@@ -9,7 +9,7 @@ from .llm import ToolCall, get_provider
 from .log import logger
 
 # How many rounds of tool calls the model may make for one question.
-MAX_TOOL_ROUNDS = 3
+MAX_TOOL_ROUNDS = 5
 
 # The tutor's instructions. Read on every question, so edits apply without a restart.
 SYSTEM_PROMPT_FILE = Path(__file__).parent / "prompts" / "system.md"

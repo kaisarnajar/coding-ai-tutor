@@ -4,7 +4,8 @@ Each chunk is one Qdrant point: its embedding plus a payload with the document i
 PDF name, page number, chunk text, and the document's page and chunk counts.
 Qdrant keeps everything on disk (data/qdrant/), so saved PDFs survive restarts.
 
-The rest of the server only uses get() / add() / search() / list() / is_empty(),
+The rest of the server only uses get() / add() / search() / list() / is_empty() /
+get_pages() / delete(),
 so another vector database could replace this file without other changes.
 """
 
@@ -115,6 +116,22 @@ class QdrantStore:
         )
         points, _ = await self.client.scroll(self.collection, scroll_filter=first_chunks, limit=1000)
         return [_document(p.payload) for p in points]
+
+    async def get_pages(self, doc_id: str, pages: List[int]) -> List[Tuple[int, int, str]]:
+        """All chunks of the given pages of a document: (page, chunk_index, text), in order."""
+        page_filter = models.Filter(
+            must=[
+                models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id)),
+                models.FieldCondition(key="page", match=models.MatchAny(any=pages)),
+            ]
+        )
+        points, _ = await self.client.scroll(self.collection, scroll_filter=page_filter, limit=1000)
+        rows = [(p.payload["page"], p.payload["chunk_index"], p.payload["text"]) for p in points]
+        return sorted(rows, key=lambda row: row[1])
+
+    async def delete(self, doc_id: str) -> None:
+        """Remove every chunk of a document."""
+        await self.client.delete(self.collection, points_selector=models.FilterSelector(filter=_doc_filter(doc_id)))
 
     async def is_empty(self) -> bool:
         if not await self.client.collection_exists(self.collection):
