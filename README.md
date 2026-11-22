@@ -121,6 +121,10 @@ LLM_MODEL=qwen2.5:3b
 Any model from `ollama list` works, including Ollama cloud models such as
 `glm-5.3:cloud`. Pull it first, e.g. `ollama pull mimo-v2.6`.
 
+Thinking models such as `mimo-v2.6` reason silently before they answer, so the
+first word can take several seconds. `LLM_THINK=false` turns thinking off for
+faster replies; `LLM_THINK=true` turns it on; leave it out for the model's default.
+
 **Model through an API**
 
 `LLM_PROVIDER=openai` works with any OpenAI-compatible API. For OpenRouter:
@@ -248,6 +252,7 @@ With an API model the `Ollama` lines read e.g. `→ API openrouter.ai POST /chat
 |-------------------|--------------------------|
 | `LLM_PROVIDER`    | `ollama` (or `openai` for any OpenAI-compatible API) |
 | `LLM_MODEL`       | `qwen2.5:3b`             |
+| `LLM_THINK`       | unset = model default (`false`/`true`; Ollama thinking models) |
 | `OLLAMA_URL`      | `http://localhost:11434` (used with `ollama`) |
 | `API_BASE_URL`    | `https://openrouter.ai/api/v1` (used with `openai`) |
 | `API_KEY`         | empty (used with `openai`; secret, never commit it) |

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     #   "openai": any OpenAI-compatible API, e.g. OpenRouter, OpenAI, Groq, LM Studio
     llm_provider: Literal["ollama", "openai"] = "ollama"
     llm_model: str = "qwen2.5:3b"
+    # Thinking models (e.g. mimo-v2.6) reason silently before answering, which delays
+    # the first visible word. False = no thinking (fast), True = think, unset = model default.
+    llm_think: Optional[bool] = None
 
     # Used when LLM_PROVIDER=ollama
     ollama_url: str = "http://localhost:11434"
@@ -37,7 +40,7 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Read the settings again (including backend/.env).
 
-    Called on every question, so changing LLM_PROVIDER, LLM_MODEL, API_KEY or
+    Called on every question, so changing LLM_PROVIDER, LLM_MODEL, LLM_THINK, API_KEY or
     MCP_SERVERS in backend/.env takes effect on the next question, no restart needed.
     """
     return Settings()

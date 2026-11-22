@@ -21,9 +21,12 @@ class OllamaProvider(Provider):
         payload = {"model": self.model, "messages": messages, "stream": True}
         if tools:
             payload["tools"] = tools
+        if self.settings.llm_think is not None:
+            payload["think"] = self.settings.llm_think
         logger.info(
-            "   → Ollama POST /api/chat model=%s messages=%d tools=%d",
+            "   → Ollama POST /api/chat model=%s messages=%d tools=%d think=%s",
             self.model, len(messages), len(tools or []),
+            "default" if self.settings.llm_think is None else self.settings.llm_think,
         )
         started = time.perf_counter()
         first = True
